@@ -16,6 +16,9 @@ import (
 // ffmpeg -f avfoundation -i "0:0" .... -f flv rtmp://localhost/screen
 // ffplay http://localhost:8089/movie
 // ffplay http://localhost:8089/screen
+//
+// Maybe look into WebRTC or MessagePack or red5...
+// go-webrtc doesn't support video/audio
 
 // The channel type for multiple channel usage ¯\_(ツ)_/¯
 type Channel struct {
