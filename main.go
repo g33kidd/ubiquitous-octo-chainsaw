@@ -103,6 +103,7 @@ func main() {
     // NOTE: We probably really don't need this.
     // TODO: Just read the stream as rtmp://
     // NOTE: Keeps getting invalid data ¯\_(ツ)_/¯
+    // TODO: Look at updating the joy4 package if it needs updating
     // HTTP Handler for clients and plays for the server
     http.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
         rwmutex.RLock()
