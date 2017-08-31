@@ -2,7 +2,6 @@ package main
 
 import (
     "sync"
-    "fmt"
 	"io"
 	"net/http"
 	"github.com/nareix/joy4/format"
@@ -17,6 +16,20 @@ type Channel struct {
     queue *pubsub.Queue
 }
 
+func init() {
+    format.RegisterAll()
+}
+
+type writeFlusher struct {
+    httpflusher http.Flusher
+    io.Writer
+}
+
+func (self writeFlusher) Flush() error {
+    self.httpflusher.Flush()
+    return nil
+}
+
 func main() {
 
     // Setup some variables
@@ -24,12 +37,23 @@ func main() {
     rwmutex     := &sync.RWMutex{}
     channels    := map[string] *Channel{}
 
+    // Handles plays
+    server.HandlePlay = func(conn *rtmp.Conn) {
+        rwmutex.RLock()
+        channel := channels[conn.URL.Path]
+        rwmutex.RUnlock()
+
+        if channel != nil {
+            cursor := channel.queue.Latest()
+            avutil.CopyFile(conn, cursor)
+        }
+    }
+
     // Handles publishing when something comes into the stream ¯\_(ツ)_/¯
     // TODO: Read the docs on this more...
     server.HandlePublish = func(conn *rtmp.Conn) {
         streams, _ := conn.Streams()
 
-        // Lock it to prevent further writes...
         rwmutex.Lock()
 
         // The current channel for this stream
@@ -43,7 +67,6 @@ func main() {
             channel = nil
         }
 
-        // Unlock the mutex
         rwmutex.Unlock()
 
         if channel == nil {
@@ -52,6 +75,41 @@ func main() {
 
         // Copies the packets that are currently being published.
         avutil.CopyPackets(channel.queue, conn)
+
+        // ¯\_(ツ)_/¯ ¯\_(ツ)_/¯ ¯\_(ツ)_/¯
+        // NOTE delete teh channel, but whys?
+        rwmutex.Lock()
+        delete(channels, conn.URL.Path)
+        rwmutex.Unlock()
+
+        channel.queue.Close()
     }
+
+    // HTTP Handler for clients and plays for the server
+    http.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
+        rwmutex.RLock()
+        channel := channels[req.URL.Path]
+        rwmutex.RUnlock()
+
+        if channel != nil {
+            res.Header().Set("Content-Type", "video/x-flv")
+            res.Header().Set("Transfer-Encoding", "chunked")
+            res.Header().Set("Access-Control-Allow-Origin", "*")
+            res.WriteHeader(200)
+
+            flusher := res.(http.Flusher)
+            flusher.Flush()
+
+            muxer   := flv.NewMuxerWriteFlusher(writeFlusher{httpflusher: flusher, Writer: res})
+            cursor  := channel.queue.Latest()
+
+            avutil.CopyFile(muxer, cursor)
+        } else {
+            http.NotFound(res, req)
+        }
+    })
+
+    go http.ListenAndServe(":8089", nil)
+    server.ListenAndServe()
 
 }
