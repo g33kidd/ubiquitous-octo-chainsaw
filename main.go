@@ -12,6 +12,11 @@ import (
 	"github.com/nareix/joy4/format/flv"
 )
 
+// ffmpeg -re -i movie.flv -c copy -f flv rtmp://localhost/movie
+// ffmpeg -f avfoundation -i "0:0" .... -f flv rtmp://localhost/screen
+// ffplay http://localhost:8089/movie
+// ffplay http://localhost:8089/screen
+
 // The channel type for multiple channel usage ¯\_(ツ)_/¯
 type Channel struct {
     queue *pubsub.Queue
@@ -40,10 +45,12 @@ func main() {
     // Setup some variables
     server      := &rtmp.Server{}
     rwmutex     := &sync.RWMutex{}
-    channels    := map[string] *Channel{}
+    channels    := map[string]*Channel{}
 
     // Handles plays
     server.HandlePlay = func(conn *rtmp.Conn) {
+        fmt.Printf("Playing channel [%s]", conn.URL.Path)
+
         rwmutex.RLock()
         channel := channels[conn.URL.Path]
         rwmutex.RUnlock()
@@ -51,6 +58,8 @@ func main() {
         if channel != nil {
             cursor := channel.queue.Latest()
             avutil.CopyFile(conn, cursor)
+        } else {
+            fmt.Print("channel is nil in HandlePlay")
         }
     }
 
@@ -68,6 +77,7 @@ func main() {
             channel.queue = pubsub.NewQueue()
             channel.queue.WriteHeader(streams)
             channels[conn.URL.Path] = channel
+            fmt.Printf("Setting channel [%s]\n", conn.URL.Path)
         } else {
             channel = nil
         }
@@ -83,13 +93,16 @@ func main() {
 
         // ¯\_(ツ)_/¯ ¯\_(ツ)_/¯ ¯\_(ツ)_/¯
         // NOTE delete teh channel, but whys?
-        rwmutex.Lock()
-        delete(channels, conn.URL.Path)
-        rwmutex.Unlock()
+        // rwmutex.Lock()
+        // delete(channels, conn.URL.Path)
+        // rwmutex.Unlock()
 
         channel.queue.Close()
     }
 
+    // NOTE: We probably really don't need this.
+    // TODO: Just read the stream as rtmp://
+    // NOTE: Keeps getting invalid data ¯\_(ツ)_/¯
     // HTTP Handler for clients and plays for the server
     http.HandleFunc("/", func(res http.ResponseWriter, req *http.Request) {
         rwmutex.RLock()
@@ -97,6 +110,7 @@ func main() {
         rwmutex.RUnlock()
 
         fmt.Printf("Handling http request\n")
+        fmt.Printf("%+v\n", channel)
 
         if channel != nil {
             fmt.Printf("channel is not nil..\n")
