@@ -3,6 +3,7 @@ package main
 import (
     "sync"
 	"io"
+    "fmt"
 	"net/http"
 	"github.com/nareix/joy4/format"
 	"github.com/nareix/joy4/av/avutil"
@@ -17,6 +18,7 @@ type Channel struct {
 }
 
 func init() {
+    fmt.Printf("Initializing...\n")
     format.RegisterAll()
 }
 
@@ -26,11 +28,14 @@ type writeFlusher struct {
 }
 
 func (self writeFlusher) Flush() error {
+    fmt.Printf("Flushing...\n")
     self.httpflusher.Flush()
     return nil
 }
 
 func main() {
+
+    fmt.Printf("Main...\n")
 
     // Setup some variables
     server      := &rtmp.Server{}
@@ -91,7 +96,10 @@ func main() {
         channel := channels[req.URL.Path]
         rwmutex.RUnlock()
 
+        fmt.Printf("Handling http request\n")
+
         if channel != nil {
+            fmt.Printf("channel is not nil..\n")
             res.Header().Set("Content-Type", "video/x-flv")
             res.Header().Set("Transfer-Encoding", "chunked")
             res.Header().Set("Access-Control-Allow-Origin", "*")
@@ -109,6 +117,7 @@ func main() {
         }
     })
 
+    fmt.Printf("starting http and rtmp server...\n")
     go http.ListenAndServe(":8089", nil)
     server.ListenAndServe()
 
