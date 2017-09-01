@@ -1,8 +1,6 @@
 package main
 
 import (
-	"sync"
-
 	"./models"
 	"./streaming"
 
@@ -42,7 +40,6 @@ type Stream struct {
 // Env is our application environment
 type Env struct {
 	db     *gorm.DB
-	l      *sync.RWMutex
 	stream *streaming.Server
 }
 
@@ -54,17 +51,16 @@ func main() {
 		log.Panic(err)
 	}
 
-	// Setup the mutex lock to be used.
-	l := &sync.RWMutex{}
-
 	// Setup the streaming server
 	server, err := streaming.NewStreamingServer()
 	if err != nil {
 		log.Panic(err)
 	}
 
-	env := &Env{db, l, server}
+	env := &Env{db, server}
 	models.InitTables(env.db)
+
+	env.stream.Start()
 
 	// env.server.HandlePublish = streaming.HandlePublish
 	// env.server.HandleConn = streaming.HandleConn
