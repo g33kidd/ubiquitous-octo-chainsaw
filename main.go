@@ -32,20 +32,18 @@ func (wf writeFlusher) Flush() error {
 	return nil
 }
 
-// Stream handles the PubSub queue for I assume what is transmitting packets or
-// at least holding chunks?
-// TODO: Read the docs on PubSub Queue or look at the code.
-type Stream struct {
-	que *pubsub.Queue
-}
+type (
+	Stream struct {
+		que *pubsub.Queue
+	}
 
-// Channel for the user account and for the stream to be hosted on
-type Channel struct {
-	gorm.Model
+	Channel struct {
+		gorm.Model
 
-	Username  string
-	StreamKey string
-}
+		Username  string
+		StreamKey string
+	}
+)
 
 func main() {
 
@@ -112,9 +110,9 @@ func main() {
 
 		l.Lock()
 		delete(channels, channel.Username)
-		log.Println("Stopping stream", channel.Username)
 		l.Unlock()
 
+		log.Println("Stopping stream", channel.Username)
 		stream.que.Close()
 	}
 
@@ -154,11 +152,13 @@ func main() {
 
 			avutil.CopyFile(muxer, cursor)
 		} else {
-			http.NotFound(w, r)
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.WriteHeader(200)
 		}
 	})
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		log.Println("Handling /ws request")
 		ServeWs(hub, w, r)
 	})
 
