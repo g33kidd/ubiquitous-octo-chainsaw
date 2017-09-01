@@ -32,7 +32,9 @@ func (wf writeFlusher) Flush() error {
 	return nil
 }
 
-// Stream something something
+// Stream handles the PubSub queue for I assume what is transmitting packets or
+// at least holding chunks?
+// TODO: Read the docs on PubSub Queue or look at the code.
 type Stream struct {
 	que *pubsub.Queue
 }
@@ -47,12 +49,14 @@ type Channel struct {
 
 func main() {
 
+	// Open the database connection.
 	db, err := gorm.Open("sqlite3", "./database/development.db")
 	if err != nil {
 		panic("failed to connect to database")
 	}
 	defer db.Close()
 
+	// Just for testing... instead of migrations and all that stuff..
 	db.DropTable(&Channel{})
 	db.CreateTable(&Channel{})
 	db.Create(&Channel{Username: "g33kidd", StreamKey: "stream_key_12345"})
