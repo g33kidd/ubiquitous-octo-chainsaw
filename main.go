@@ -4,11 +4,9 @@ import (
 	"./models"
 	"./streaming"
 
-	"io"
 	"log"
 	"net/http"
 
-	"github.com/nareix/joy4/av/pubsub"
 	"github.com/nareix/joy4/format"
 
 	"github.com/jinzhu/gorm"
@@ -17,24 +15,6 @@ import (
 
 func init() {
 	format.RegisterAll()
-}
-
-// TODO: Move these to its own package
-type writeFlusher struct {
-	httpflusher http.Flusher
-	io.Writer
-}
-
-func (wf writeFlusher) Flush() error {
-	wf.httpflusher.Flush()
-	return nil
-}
-
-// Stream handles the PubSub queue for I assume what is transmitting packets or
-// at least holding chunks?
-// TODO: Read the docs on PubSub Queue or look at the code.
-type Stream struct {
-	que *pubsub.Queue
 }
 
 // Env is our application environment
@@ -60,7 +40,9 @@ func main() {
 	env := &Env{db, server}
 	models.InitTables(env.db)
 
-	env.stream.Start()
+	go env.stream.Start()
+	http.HandleFunc("/", env.stream.HandleHTTP)
+	http.ListenAndServe(":8089", nil)
 
 	// env.server.HandlePublish = streaming.HandlePublish
 	// env.server.HandleConn = streaming.HandleConn
