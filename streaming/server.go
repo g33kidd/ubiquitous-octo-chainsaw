@@ -7,6 +7,9 @@ import (
 	"strings"
 	"sync"
 
+	"../models"
+
+	"github.com/jinzhu/gorm"
 	"github.com/nareix/joy4/av/avutil"
 	"github.com/nareix/joy4/av/pubsub"
 	"github.com/nareix/joy4/format/flv"
@@ -18,14 +21,15 @@ type Stream struct {
 	que *pubsub.Queue
 }
 
-// Server handles RTMP requests
+// Server handles RTMP requests.
+// It also stores the current streams that are running.
 type Server struct {
 	rtmpServer *rtmp.Server
 	l          *sync.RWMutex
 	streams    map[string]*Stream
+	db         *gorm.DB
 }
 
-// TODO: Move these to its own package
 type writeFlusher struct {
 	httpflusher http.Flusher
 	io.Writer
@@ -38,13 +42,14 @@ func (wf writeFlusher) Flush() error {
 
 // NewStreamingServer creates a new streaming server
 // TODO: Handle errors Errors
-func NewStreamingServer() (*Server, error) {
+func NewStreamingServer(db *gorm.DB) (*Server, error) {
 	server := &Server{}
 
 	rtmpServer := &rtmp.Server{HandlePublish: server.HandlePublish}
 	l := &sync.RWMutex{}
 	streams := map[string]*Stream{}
 
+	server.db = db
 	server.rtmpServer = rtmpServer
 	server.l = l
 	server.streams = streams
@@ -59,8 +64,7 @@ func (server *Server) Start() {
 
 // HandlePublish handles incoming RTMP connections
 func (server *Server) HandlePublish(conn *rtmp.Conn) {
-	var streamKey string
-
+	streamKey := ""
 	params := strings.Split(conn.URL.Path, "/")
 	streams, _ := conn.Streams()
 
@@ -75,15 +79,25 @@ func (server *Server) HandlePublish(conn *rtmp.Conn) {
 		return
 	}
 
+	channel, err := models.FindChannelByStreamKey(server.db, streamKey)
+	if err != nil {
+		log.Println(err)
+	}
+
+	if channel == nil {
+		conn.Close()
+		return
+	}
+
 	// Initialize the stream. Send stream data over the Queue
 	server.l.Lock()
-	stream := server.streams[streamKey]
+	stream := server.streams[channel.Username]
 	if stream == nil {
 		stream = &Stream{}
 		stream.que = pubsub.NewQueue()
 		stream.que.WriteHeader(streams)
-		server.streams[streamKey] = stream
-		log.Println("Created stream", streamKey)
+		server.streams[channel.Username] = stream
+		log.Println("Created stream", channel.Username)
 	} else {
 		stream = nil
 	}
@@ -98,32 +112,34 @@ func (server *Server) HandlePublish(conn *rtmp.Conn) {
 
 	// Stop the stream
 	server.l.Lock()
-	delete(server.streams, streamKey)
+	delete(server.streams, channel.Username)
 	server.l.Unlock()
 
 	// Close the PubSub Queue, we are done with it...
+	log.Println("Stopping stream", channel.Username)
 	stream.que.Close()
 }
 
 // HandleHTTP : Handles HTTP requests to a given stream.
+// TODO: comment this stuff...
 func (server *Server) HandleHTTP(w http.ResponseWriter, r *http.Request) {
 
-	var streamKey string
-
+	username := ""
 	params := strings.Split(r.URL.Path, "/")
 
 	// Get the StreamKey from URL Path.
 	// It should be the only path parameter.
 	// Close the connection if we don't have a StreamKey
 	if len(params) > 1 {
-		streamKey = params[1]
+		username = params[1]
 	} else if len(params) == 0 {
 		http.NotFound(w, r)
 		return
 	}
 
+	// Sets the current stream from the list of streams.
 	server.l.RLock()
-	stream := server.streams[streamKey]
+	stream := server.streams[username]
 	server.l.RUnlock()
 
 	if stream != nil {

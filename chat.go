@@ -9,6 +9,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// TODO: Refactor this...
+// Handle different payloads for different things.
+
 const (
 	// Time allowed to write a message to the peer.
 	writeWait = 10 * time.Second
