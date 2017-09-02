@@ -12,17 +12,34 @@ type Channel struct {
 	Status    string
 }
 
-// AllChannels : Finds all channels in the database
+// AllChannels queries the database for all Channels.
+// It returns a list of Channels.
 func AllChannels(db *gorm.DB) ([]*Channel, error) {
-	return nil, nil
+	channels := []*Channel{}
+	if err := db.Find(&channels).Error; err != nil {
+		return nil, err
+	}
+	return channels, nil
 }
 
-// FindChannelByUsername : Finds a channel by it's username
+// FindChannelByUsername queries the database for any Channel with the matching
+// username passed in.
+// It returns a Channel and any errors that might have been encountered.
 func FindChannelByUsername(db *gorm.DB, username string) (*Channel, error) {
-	return nil, nil
+	channel := &Channel{}
+	if err := db.Where("username = ?", username).First(&channel).Error; err != nil {
+		return nil, err
+	}
+	return channel, nil
 }
 
-// FindChannelByStreamKey : Finds a channel by it's stream_key
+// FindChannelByStreamKey queries the database for any Channel with the matching
+// stream key passed in.
+// It returns the Channel and any errors that might have been encountered.
 func FindChannelByStreamKey(db *gorm.DB, key string) (*Channel, error) {
-	return nil, nil
+	channel := &Channel{}
+	if err := db.Where("stream_key = ?", key).First(&channel).Error; err != nil {
+		return nil, err
+	}
+	return channel, nil
 }
