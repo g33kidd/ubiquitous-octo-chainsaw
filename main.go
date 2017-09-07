@@ -13,6 +13,9 @@ import (
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 )
 
+// TODO: Fuck it. Move everything to main.go...
+// This likely won't be a HUGE service. If it becomes that, just extract things out.
+
 func init() {
 	// Register all codecs.
 	// Later on we could probably just include the ones we need?
@@ -23,14 +26,9 @@ func init() {
 type Env struct {
 	db     *gorm.DB
 	stream *streaming.Server
-	hub    *Hub
 }
 
 func main() {
-
-	// Starts the Chat Hub
-	// TODO: How to pass this to the Streaming server?
-	hub := NewHub()
 
 	// Open the database connection.
 	db, err := models.NewDB("sqlite3", "./database/development.db")
@@ -46,20 +44,14 @@ func main() {
 
 	// Initialize our Environment.
 	// Setup our Database tables for testing
-	env := &Env{db, server, hub}
+	env := &Env{db, server}
 	models.InitTables(env.db)
-
-	// Starts the chat Hub WS server
-	go env.hub.run()
 
 	// Start the streaming server.
 	go env.stream.Start()
 
 	// HTTP Handler functions
 	http.HandleFunc("/", env.stream.HandleHTTP)
-	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		ServeWs(hub, w, r)
-	})
 
 	// Start the HTTP Server and listen
 	http.ListenAndServe(":8089", nil)
