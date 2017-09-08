@@ -1,58 +1,160 @@
 package main
 
 import (
-	"./models"
-	"./streaming"
-
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"strings"
+	"sync"
 
+	"github.com/nareix/joy4/av/avutil"
+	"github.com/nareix/joy4/av/pubsub"
 	"github.com/nareix/joy4/format"
+	"github.com/nareix/joy4/format/flv"
+	"github.com/nareix/joy4/format/rtmp"
 
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
 )
 
-// TODO: Fuck it. Move everything to main.go...
-// This likely won't be a HUGE service. If it becomes that, just extract things out.
-
 func init() {
-	// Register all codecs.
-	// Later on we could probably just include the ones we need?
 	format.RegisterAll()
 }
 
-// Env is our application environment
-type Env struct {
-	db     *gorm.DB
-	stream *streaming.Server
+type writeFlusher struct {
+	httpflusher http.Flusher
+	io.Writer
 }
+
+func (wf writeFlusher) Flush() error {
+	wf.httpflusher.Flush()
+	return nil
+}
+
+type (
+	// Stream is the stream/// ¯\_(ツ)_/¯
+	Stream struct {
+		que *pubsub.Queue
+	}
+
+	// Channel is the stream///
+	Channel struct {
+		gorm.Model
+
+		Username  string
+		StreamKey string
+	}
+)
 
 func main() {
 
 	// Open the database connection.
-	db, err := models.NewDB("sqlite3", "./database/development.db")
+	db, err := gorm.Open("sqlite3", "./database/development.db")
 	if err != nil {
-		log.Panic(err)
+		panic("failed to connect to database")
+	}
+	defer db.Close()
+
+	// Just for testing... instead of migrations and all that stuff..
+	db.DropTable(&Channel{})
+	db.CreateTable(&Channel{})
+	db.Create(&Channel{Username: "g33kidd", StreamKey: "stream_key_12345"})
+
+	// Setup some variables
+	server := &rtmp.Server{}
+	l := &sync.RWMutex{}
+	channels := map[string]*Stream{}
+
+	// Handles publishing when something comes into the stream ¯\_(ツ)_/¯
+	// TODO: Read the docs on this more...
+	server.HandlePublish = func(conn *rtmp.Conn) {
+		streams, _ := conn.Streams()
+		streamKey := strings.Replace(conn.URL.Path, "/", "", -1)
+
+		log.Println("handling publish for", streamKey)
+
+		// Get the channel we're publishing to..
+		// If we can't find the channel, close the connection immediately.
+		var channel Channel
+		if db.Where("stream_key = ?", streamKey).First(&channel).RecordNotFound() {
+			log.Println("Stream key invalid for", streamKey, "closing connection.")
+			conn.Close()
+			return
+		}
+
+		log.Println("Stream key is valid. Continuing.")
+
+		l.Lock()
+		log.Println("locked and loaded. Creating the stream.")
+		stream := channels[channel.Username]
+		if stream == nil {
+			stream = &Stream{}
+			stream.que = pubsub.NewQueue()
+			stream.que.WriteHeader(streams)
+			channels[channel.Username] = stream
+			log.Println("Created stream", channel.Username)
+		} else {
+			stream = nil
+		}
+		l.Unlock()
+
+		if stream == nil {
+			log.Println("Couldn't find stream... It is nil")
+			return
+		}
+
+		avutil.CopyPackets(stream.que, conn)
+
+		l.Lock()
+		delete(channels, channel.Username)
+		l.Unlock()
+
+		log.Println("Stopping stream", channel.Username)
+		stream.que.Close()
 	}
 
-	// Setup the streaming server
-	server, err := streaming.NewStreamingServer(db)
-	if err != nil {
-		log.Panic(err)
-	}
+	// NOTE: We probably really don't need this.
+	// TODO: Just read the stream as rtmp://
+	// NOTE: Keeps getting invalid data ¯\_(ツ)_/¯
+	// TODO: Look at updating the joy4 package if it needs updating
+	// HTTP Handler for clients and plays for the server
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		username := strings.Replace(r.URL.Path, "/", "", -1)
+		log.Println(r)
+		log.Println(username)
 
-	// Initialize our Environment.
-	// Setup our Database tables for testing
-	env := &Env{db, server}
-	models.InitTables(env.db)
+		var channel Channel
+		if db.Where("username = ?", username).First(&channel).RecordNotFound() {
+			http.NotFound(w, r)
+		}
 
-	// Start the streaming server.
-	go env.stream.Start()
+		l.RLock()
+		stream := channels[channel.Username]
+		l.RUnlock()
 
-	// HTTP Handler functions
-	http.HandleFunc("/", env.stream.HandleHTTP)
+		fmt.Printf("Handling http request\n")
+		fmt.Printf("%+v\n", stream)
 
-	// Start the HTTP Server and listen
+		if stream != nil {
+			w.Header().Set("Content-Type", "video/x-flv")
+			w.Header().Set("Transfer-Encoding", "chunked")
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.WriteHeader(200)
+
+			flusher := w.(http.Flusher)
+			flusher.Flush()
+
+			muxer := flv.NewMuxerWriteFlusher(writeFlusher{httpflusher: flusher, Writer: w})
+			cursor := stream.que.Latest()
+
+			avutil.CopyFile(muxer, cursor)
+		} else {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.WriteHeader(200)
+		}
+	})
+
+	go server.ListenAndServe()
 	http.ListenAndServe(":8089", nil)
 }
